@@ -1,0 +1,341 @@
+/*jshint es3: false, forin: true, freeze: true, latedef: true, newcap: false, strict: true, undef:true, camelcase: true, curly: true, eqeqeq: false, immed: true, lastsemic: true, onevar: true, quotmark: double, unused:true, maxdepth: 4, maxcomplexity: 5 */
+/*globals $, base, describe, it, expect, Co, waitsFor, runs */
+
+sb.directive("sortable", function () {
+
+    "use strict";
+
+    /*
+     *
+     * Sortable will help sort child elements with drag/drop functionality
+     *
+     * Basic Usage:
+     *
+     * Example:
+     * <ul sb-sortable>
+     *     <li>Children</li>
+     *     ...
+     * </ul>
+     *
+     * With Params:
+     * - To work with form submission
+     * - Fields can be hidden using theme
+     * - Pass the field selector as parameter
+     * - Field should be child of dragsource elements
+     *
+     * Example:
+     * <ul sb-sortable="fieldSelector:[name=position]">
+     *     <li>Children <select name='position'><option value="1">1</option></select></li>
+     *     ...
+     * </ul>
+     *
+     *
+     * */
+
+    var Sortable = this;
+
+    // defaults
+    Sortable.defaults = {
+        DRAG_READY_CLASS: "drag-ready",
+        DRAG_MOVING_CLASS: "drag-moving",
+        DROP_READY_CLASS: "drop-ready"
+    };
+
+    Sortable.init = function (element, options) {
+        this.element = element;
+        // expose directive options as properties
+        this.setOptions(options);
+        // cache all level 1 children as sortable elements
+        this.sortables = this.element.children;
+        // cache input/select fields. For event binding
+        this.fields = this.fieldSelector && this.element.querySelectorAll(this.fieldSelector);
+        // initial setup of directive
+        this.setup();
+    };
+
+    // set up directive
+    Sortable.setup = function () {
+        var self = this;
+
+        [].forEach.call(self.sortables, function (sortable, index) {
+            var dragsource;
+            // check if node has attribue
+            dragsource = sortable.getAttribute("draggable");
+            // if not, set it
+            if (!dragsource) {
+                sortable.setAttribute("draggable", "true");
+            }
+            // update order values on element
+            sortable.setAttribute("data-order", index);
+            // set order value in field inside it
+            self.setFieldValue(sortable, index);
+        });
+    };
+
+    // start sorting
+    Sortable.sort = function (from, to) {
+
+        // if from and to elements are passed, use that
+        this.dragsource = from || this.dragsource;
+        this.droptarget = to || this.droptarget;
+
+        // making sure dragsource node is not same as droptarget node
+        if (this.droptarget !== this.dragsource) {
+            // insert node at drop droptarget
+            this.dropDraggedNode();
+            // re-setup sortables and update field values
+            this.setup();
+        }
+    };
+
+    Sortable.broadcast = function () {
+        var message, self;
+
+        self = this;
+
+        message = {
+            source: 'editor',
+            target: 'viewer',
+            action: 'reorder',
+            status: 'pending',
+            data: {
+                from: self.from,
+                to: self.to,
+                selector: self.getSelector(self.dragsource),
+                selectorType: self.dragsource.getAttribute("id") ? 'id' : 'string'
+            }
+        };
+        window.parent.postMessage(message, '*');
+    };
+
+    Sortable.getSelector = function (element) {
+        var selector;
+        // if element is card
+        if (element.getAttribute("id") !== null) {
+            selector = "card-" + element.getAttribute("id");
+        }
+        // element is navigation
+        else if (element.getAttribute('data-hyperlink') === 'navigation' && element.querySelector("a>span").innerText) {
+            var nav = element.querySelector("a>span").innerText;
+            selector = "div.navigation>ul>li:contains('" + nav + "')"
+        }
+        else if (element.getAttribute('data-hyperlink') === 'cta') {
+            selector = "li[data-cta=hyperlink" + element.getAttribute('data-order') + "]"
+        }
+        return selector;
+    };
+
+    // insert node after drop
+    Sortable.dropDraggedNode = function () {
+
+        this.from = [].indexOf.call(this.sortables, this.dragsource);
+        this.to = [].indexOf.call(this.sortables, this.droptarget);
+
+        // broadcast to viewer
+        this.broadcast();
+        // reorder nodes
+        this.reorder(this.from, this.to, this.element);
+    };
+
+    // re-order dom nodes
+    // this method is reused in siteeditor directive
+    Sortable.reorder = function (from, to, parent) {
+
+        var droptarget, dragsource, firstChild, lastChild, nextSibling, prevSibling;
+
+        from = +from;
+        to = +to;
+
+        if (isNaN(from) || isNaN(to) || !parent || !parent.children) {
+            return false;
+        }
+
+        dragsource = parent.children[from];
+        droptarget = parent.children[to];
+
+        // first node of parent
+        firstChild = parent.firstElementChild;
+        // first node of parent
+        lastChild = parent.lastElementChild;
+        // next sibling of droptarget
+        nextSibling = droptarget.nextElementSibling;
+        // prev sibling of droptarget
+        prevSibling = droptarget.previousElementSibling;
+
+        // special cases for drop
+        if (droptarget === firstChild) {
+            // Drop droptarget is first child node
+            // Insert the dragsource node before the first child
+            parent.insertBefore(dragsource, droptarget);
+        } else if (droptarget === lastChild) {
+            // Drop droptarget is last child node
+            // Append dragsource node to the parent
+            parent.appendChild(dragsource);
+        } else if (dragsource === nextSibling) {
+            // If dragsource is next sibling of droptarget
+            parent.insertBefore(dragsource, droptarget);
+        } else if (dragsource === prevSibling) {
+            // Rest of the scenario
+            parent.insertBefore(dragsource, nextSibling);
+        } else {
+            // Rest of the scenario
+            parent.insertBefore(dragsource, droptarget);
+        }
+        return true;
+    };
+    // set order value to input field
+    Sortable.setFieldValue = function (sortable, value) {
+        var field;
+        // check if field is available
+        field = (sortable && this.fields) && sortable.querySelector(this.fieldSelector);
+        if (field) {
+            // if yes, change the order value
+            field.value = value;
+        }
+    };
+
+    // clear all class names on elements interacted by dragsource
+    Sortable.clearClassNames = function () {
+        var self = this;
+        // remove all class names
+        [].forEach.call(self.sortables, function (sortable) {
+            self.removeCssClass(sortable, self.defaults.DRAG_READY_CLASS);
+            self.removeCssClass(sortable, self.defaults.DRAG_MOVING_CLASS);
+        });
+    };
+
+    Sortable.addCssClass = function (element, classname) {
+        if (element && element.classList && classname) {
+            element.classList.add(classname);
+        }
+    };
+
+    Sortable.removeCssClass = function (element, classname) {
+        if (element && element.classList && classname) {
+            element.classList.remove(classname);
+        }
+    };
+
+    /*** Handle events ***/
+
+        // handle mouse down event
+    Sortable.mousedown = function (e) {
+        // set activated property
+        this.active = true;
+        // coordinates to position drag image
+        this.dragImageLeft = e.pageX - e.currentTarget.offsetLeft;
+        this.dragImageRight = e.pageY - e.currentTarget.offsetTop;
+
+        // add class to indicate element is ready to be dragged
+        this.addCssClass(e.currentTarget, this.defaults.DRAG_READY_CLASS);
+    };
+    Sortable.mousedown.context = "sortables";
+
+    // handle mouse up event
+    Sortable.mouseup = function () {
+        // avoid accidental invocation
+        // when drag was initiated and not performed
+        if (this.active) {
+            this.active = false;
+            //clear all class names added during the activity
+            this.clearClassNames();
+        }
+    };
+    Sortable.mouseup.context = "sortables";
+
+    // start a dragsource node
+    Sortable.dragstart = function (e) {
+        var dragtransfer;
+
+        // set this element as dragsource
+        this.dragsource = e && e.currentTarget;
+
+        // datatransfer object
+        dragtransfer = e.originalEvent && e.originalEvent.dataTransfer;
+
+        // dispatch drag event always passes null in originalEvent.dataTransfer
+        dragtransfer = dragtransfer || {};
+
+        // setting drag effect to move
+        dragtransfer.effectAllowed = "move";
+
+        if (dragtransfer.setDragImage) {
+            // set drag image
+            // makes sense when drag source is anchor
+            dragtransfer.setDragImage(this.dragsource, this.dragImageLeft, e.currentTarget.offsetHeight/2);
+        }
+
+        // add class name to indicate the element is in motion
+        this.addCssClass(this.dragsource, this.defaults.DRAG_MOVING_CLASS);
+    };
+    Sortable.dragstart.context = "sortables";
+
+    // when dragsource enters your boundary
+    Sortable.dragenter = function (e) {
+        // set the element as droptarget
+        this.droptarget = e.currentTarget;
+        // re-sort elements
+        this.sort();
+    };
+    Sortable.dragenter.context = "sortables";
+
+    // when dragsource is in hover mode
+    Sortable.dragover = function (e) {
+        e.preventDefault();
+    };
+    Sortable.dragover.context = "sortables";
+
+    // dragsource just landed on you
+    Sortable.drop = function (e) {
+        e.preventDefault();
+        this.ajaxsort && this.saveOrder();
+    };
+    Sortable.drop.context = "sortables";
+
+    Sortable.saveOrder = function () {
+        var form = this.element.closest("form");
+        form && form.dispatchEvent(new Event("submit", {bubbles: true, cancelable: true}));
+    };
+
+    // and finally
+    Sortable.dragend = function (e) {
+        //clear all moving and hover class names
+        this.clearClassNames();
+    };
+    Sortable.dragend.context = "sortables";
+
+    // get parent dragsource element
+    Sortable.getSourceNode = function (element) {
+        // traverse and find dragsource parent
+        while (element.parentNode) {
+            // check if element has dragsource property
+            if (!element.getAttribute("draggable")) {
+                // not dragsource, traverse upwards
+                element = element.parentNode;
+            } else {
+                return element;
+            }
+        }
+    };
+
+    // handle manual sort entry
+    Sortable.change = function (e) {
+
+        var value, validRange, sortables;
+
+        sortables = this.sortables;
+
+        // new drop position
+        value = +(e.target.value);
+        // value range should be from 1 to elements length
+        validRange = !(value < 0) && (value < sortables.length);
+
+        // sort if value is with-in range
+        if (validRange) {
+            // sort elements
+            this.sort(this.getSourceNode(e.target), sortables[value]);
+        }
+    };
+    Sortable.change.context = "fields";
+
+});

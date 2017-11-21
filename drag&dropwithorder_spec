@@ -1,0 +1,205 @@
+/*jshint es3: false, forin: true, freeze: true, latedef: true, newcap: false, strict: true, undef:true, camelcase: true, curly: true, eqeqeq: false, immed: true, lastsemic: true, onevar: true, quotmark: double, unused:true, maxdepth: 4, maxcomplexity: 5 */
+/*globals $, afterEach, base, beforeEach, Co, describe, expect, it, runs, waitsFor */
+
+sb.directive.sortable("spec", function () {
+
+    "use strict";
+
+    describe("sb.directive.sortable", function () {
+        var $element, element, directive, generateLis, newDragEvent,
+            first, last, mockBefore, mockAfter;
+
+        it("is a co module", function () {
+            expect(sb.directive.sortable.isCo).toBe(true);
+        });
+
+        // generate li's for mock data
+        generateLis = function (count, withInputs) {
+            var li = "";
+            for (var i = 0; i < count; i++) {
+                if (withInputs) {
+                    li += '<li><input type="text" name="i' + i + '" />' + i + '</li>';
+                } else {
+                    li += '<li></li>'
+                }
+            }
+            return li;
+        };
+
+        // drag events to stimulate drag/drop
+        newDragEvent = function (name) {
+            return new DragEvent(name, {
+                view: window,
+                bubbles: true,
+                cancelable: true
+            });
+        };
+
+        // mock data for running for sort tests
+        mockBefore = function (withInputs) {
+            //$element && $element.remove();
+            var params = withInputs ? "='fieldSelector:[type=text]'" : "";
+            var lis = generateLis(10, withInputs);
+            $element = $("<ul sb-sortable" + params + ">"
+                + lis
+                + "</ul>");
+
+            $("body").append($element);
+            element = $element[0];
+
+            Co.directive.activate(element);
+            directive = element.directives["sb-sortable"];
+
+            first = directive.element.firstElementChild;
+            last = directive.element.lastElementChild;
+        };
+
+        // remove element after every run
+        mockAfter = function () {
+            $element && $element.remove();
+        };
+
+        describe("initialisation", function () {
+
+            beforeEach(function () {
+                $element = $("<ul sb-sortable><li></li><li></li></ul>");
+
+                $("body").append($element);
+                element = $element[0];
+
+                Co.directive.activate(element);
+                directive = element.directives["sb-sortable"];
+            });
+
+            afterEach(function () {
+                $element.remove();
+            });
+
+            it("will apply sortable directive on the element", function () {
+                expect(directive).toBeOfType("object");
+                expect(directive.init).toBeOfType("function");
+            });
+
+            it("will expose elements to deal with as properties", function () {
+                expect(directive.element).toBe(element);
+                expect(directive.sortables).toBe(element.children);
+                expect(directive.sortables.length).toBe(element.children.length);
+            });
+
+            it("will set draggable property on sortables(children)", function () {
+                var sortables = directive.element.querySelectorAll("[draggable=true]");
+                expect(directive.sortables.length).toBe(sortables.length);
+            });
+        });
+
+        describe("drag and drop", function () {
+
+            beforeEach(function () {
+                mockBefore();
+            });
+
+            afterEach(function () {
+                mockAfter();
+            });
+
+            it("from first to last", function () {
+                var newLast,
+                    secondSibling = first.nextElementSibling;
+
+                first.dispatchEvent(newDragEvent("dragstart"));
+                last.dispatchEvent(newDragEvent("dragenter"));
+
+                newLast = directive.element.lastElementChild;
+
+                expect(directive.element.firstElementChild.isSameNode(secondSibling)).toBeTruthy();
+                expect(newLast.isSameNode(first)).toBeTruthy();
+                expect(newLast.previousElementSibling.isSameNode(last)).toBeTruthy();
+            });
+
+            it("from last to first", function () {
+                var newFirst;
+
+                last.dispatchEvent(newDragEvent("dragstart"));
+                first.dispatchEvent(newDragEvent("dragenter"));
+
+                newFirst = directive.element.firstElementChild;
+
+                expect(newFirst.isSameNode(last)).toBeTruthy();
+                expect(newFirst.nextElementSibling.isSameNode(first)).toBeTruthy();
+            });
+
+            it("between elements", function () {
+                var thirdElem, fifthElem;
+
+                thirdElem = directive.sortables[3];
+                fifthElem = directive.sortables[5];
+
+                thirdElem.dispatchEvent(newDragEvent("dragstart"));
+                fifthElem.dispatchEvent(newDragEvent("dragenter"));
+
+                expect(fifthElem.previousElementSibling.isSameNode(thirdElem)).toBeTruthy();
+                expect(fifthElem.isSameNode(fifthElem)).toBeTruthy();
+            });
+        });
+
+        describe("sorting with input field", function () {
+
+            beforeEach(function () {
+                mockBefore(true);
+            });
+
+            afterEach(function () {
+                mockAfter();
+            });
+
+            it("update order for valid range value", function () {
+                var thirdElem, newFirst;
+
+                thirdElem = directive.sortables[3];
+                $(thirdElem).find("[name=i3]").val("0").change();
+
+                newFirst = directive.element.firstElementChild;
+
+                expect(newFirst.isSameNode(thirdElem)).toBeTruthy();
+                expect(newFirst.nextElementSibling.isSameNode(first)).toBeTruthy();
+            });
+
+            it("does not update order for invalid range value", function () {
+                $(directive.sortables[3]).find("[name=i3]").val("11").blur();
+                expect(directive.element.isSameNode(element)).toBeTruthy();
+            });
+        });
+
+        describe("reorder method", function () {
+
+            beforeEach(function () {
+                mockBefore();
+            });
+
+            afterEach(function () {
+                mockAfter();
+            });
+
+            it("expects from, to and parent parameters", function () {
+                var reorder, parent, from, to;
+
+                reorder = directive.reorder();
+                expect(reorder).toBeFalsy();
+
+                reorder = directive.reorder("NaN", "NaN", "NaE");
+                expect(reorder).toBeFalsy();
+            });
+
+            it("orders nodes based on parameters", function () {
+                var thirdElem, newFirst;
+
+                thirdElem = directive.sortables[2];
+                directive.reorder(2, 0, directive.element);
+                newFirst = directive.element.firstElementChild;
+
+                expect(newFirst.isSameNode(thirdElem)).toBeTruthy();
+                expect(newFirst.nextElementSibling.isSameNode(first)).toBeTruthy();
+            });
+        });
+    });
+});

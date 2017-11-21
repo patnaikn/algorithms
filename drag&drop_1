@@ -1,0 +1,254 @@
+/*jshint es3: false, forin: true, freeze: true, latedef: true, newcap: false, strict: true, undef:true, camelcase: true, curly: true, eqeqeq: false, immed: true, lastsemic: true, onevar: true, quotmark: double, unused:true, maxdepth: 4, maxcomplexity: 5 */
+/*globals $, base, describe, it, expect, Co, waitsFor, runs */
+
+sb.directive("sortmigratorcontent", function () {
+    "use strict";
+    var Migrator = this;
+    var _classNames = {
+        active: "active",
+        clone: "clone",
+        current: "current",
+        target: "target",
+        added: "added"
+    };
+    Migrator.init = function (element, options) {
+        this.setOptions(options);
+        this.element = element;
+    };
+
+    Migrator.addClass = function (elem, className) {
+        elem.classList.add(_classNames[className]);
+    };
+    Migrator.removeClass = function (elem, className) {
+        elem.classList.remove(_classNames[className]);
+    };
+    // Set target class name to potential target element
+    Migrator.setTargetClass = function (elm) {
+        var self = this;
+
+        self.removeTargetClass();
+        self.addClass(elm, "target");
+    };
+
+    // Remove target class from all drop targets
+    Migrator.removeTargetClass = function () {
+        var self = this;
+        var targetElms = self.element.querySelectorAll("." + _classNames.target);
+        targetElms && [].forEach.call(targetElms, function (targetElm) {
+            self.removeClass(targetElm, "target");
+        });
+    };
+
+    Migrator.getMatchingElement = function (element, match) {
+
+        var nodeName;
+
+        nodeName = element && element.nodeName; //check and assign elements node name
+
+        if (!nodeName || !match) {
+            return false; //both arguments are mandatory
+        }
+
+        if (nodeName.toLowerCase() === match) {
+            return element; //element matches criteria
+        }
+
+        element = element.closest(match); //look for a closest matching parent
+
+        return element || false; //parent matches criteria
+    };
+
+    // Show drop placeholder
+    Migrator.showPlaceholder = function () {
+        var self = this;
+        var target = self.dropElemTarget;
+        var placeholder = self.getPlaceHolder();
+
+        var sibling = (self.yaxis > 0.5) ? "nextElementSibling" : "previousElementSibling";
+        var isCloneSibling = target && target[sibling] && target[sibling].classList.contains(_classNames.clone);
+
+        if (!isCloneSibling) {
+            self.removePlaceholder();
+            self.setDropElement(placeholder);
+        }
+
+        setTimeout(function () {
+            placeholder.style.height = self.dragElemHeight + "px";
+        }, 10);
+    };
+
+    // Remove placeholder element
+    Migrator.removePlaceholder = function () {
+        var placeholder = this.element.querySelector("." + _classNames.clone);
+        placeholder && placeholder.parentNode.removeChild(placeholder);
+    };
+
+    Migrator.getPlaceHolder = function () {
+        var placeholder = document.createElement("span");
+        placeholder.classList.add(_classNames.clone);
+        return placeholder;
+    };
+
+    Migrator.mousedown = function (e) {
+        var list = this.getMatchingElement(e.target, "li");
+        if (list) {
+            list.setAttribute("draggable", true);
+        }
+    };
+
+    Migrator.mousedown.context = "element";
+
+    //Handle dragstart event
+    Migrator.dragstart = function (e) {
+        var list = this.getMatchingElement(e.target, "li");
+
+        if (list) {
+            // proceed if the target or its nearest parent is an LI
+            var self = this;
+            var dragTransfer;
+            self.dragElem = list;
+            self.dragElemHeight = self.dragElem.offsetHeight;
+            self.dragElemLeft = e.pageX - e.currentTarget.offsetLeft;
+            self.dragElemParent = self.dragElem.parentNode;
+
+            self.addClass(self.dragElem, 'active');
+
+            dragTransfer = e.originalEvent && e.originalEvent.dataTransfer;
+            dragTransfer.setData("text/plain", self.dragElem.id);
+            dragTransfer.effectAllowed = "move";
+            if(dragTransfer.setDragImage){
+                dragTransfer.setDragImage(self.dragElem, self.dragElemLeft, self.dragElemHeight / 2);
+            }
+            setTimeout(function () {
+                self.addClass(self.dragElem, "current");
+            });
+            e.stopPropagation && e.stopPropagation();
+        }
+
+    };
+    Migrator.dragstart.context = "element";
+    Migrator.dragstart.event = "dragstart";
+
+    //Handle dragenter event
+    Migrator.dragenter = function (e) {
+        var self = this;
+        var list = e.target && this.getMatchingElement(e.target.parentNode, "li");
+        self.dropElem = list;
+        if (self.dropElem && !self.previeMode) {
+            self.previeMode = true;
+            var dropElemRect = self.dropElem.getBoundingClientRect();
+            self.yaxis = (e.originalEvent.clientY - dropElemRect.top) / (dropElemRect.bottom - dropElemRect.top);
+            self.dropElemParent = self.dropElem.parentNode;
+            self.dropElemTarget = self.dropElem;
+
+            self.setTargetClass(self.dropElem);
+            if (self.dropElemParent === self.dragElemParent) {
+                self.showPlaceholder();
+            }
+            setTimeout(function () {
+                self.previeMode = false;
+            }, 400);
+        }
+        e.stopPropagation();
+        e.preventDefault();
+
+    };
+    Migrator.dragenter.context = "element";
+    Migrator.dragenter.event = "dragenter";
+
+    // start sorting
+    Migrator.sort = function (from, to) {
+
+        // if from and to elements are passed, use that
+        this.dragsource = from || this.dragElem;
+        this.droptarget = to || this.dropElem;
+
+        // making sure dragsource node is not same as droptarget node
+        if (this.droptarget !== this.dragsource) {
+            // insert node at drop droptarget
+            this.dropDraggedNode();
+        }
+    };
+
+    Migrator.dropDraggedNode = function () {
+
+        this.draggables = this.element.querySelectorAll("li");
+
+        this.from = [].indexOf.call(this.draggables, this.dragsource);
+        this.to = [].indexOf.call(this.draggables, this.droptarget);
+        // reorder nodes
+        this.reorder(this.from, this.to, this.element);
+    };
+
+    Migrator.reorder = function (from, to, parent) {
+
+        var droptarget, dragsource, firstChild, lastChild, nextSibling, prevSibling;
+
+        from = +from;
+        to = +to;
+
+        if (isNaN(from) || isNaN(to) || !parent || !parent.children) {
+            return false;
+        }
+
+        dragsource = parent.children[from];
+        droptarget = parent.children[to];
+
+        // first node of parent
+        firstChild = parent.firstElementChild;
+        // first node of parent
+        lastChild = parent.lastElementChild;
+        // next sibling of droptarget
+        nextSibling = droptarget.nextElementSibling;
+        // prev sibling of droptarget
+        prevSibling = droptarget.previousElementSibling;
+
+        // special cases for drop
+        if (droptarget === firstChild) {
+            // Drop droptarget is first child node
+            // Insert the dragsource node before the first child
+            parent.insertBefore(dragsource, droptarget);
+        } else if (droptarget === lastChild) {
+            // Drop droptarget is last child node
+            // Append dragsource node to the parent
+            parent.appendChild(dragsource);
+        } else if (dragsource === nextSibling) {
+            // If dragsource is next sibling of droptarget
+            parent.insertBefore(dragsource, droptarget);
+        } else if (dragsource === prevSibling) {
+            // Rest of the scenario
+            parent.insertBefore(dragsource, nextSibling);
+        } else {
+            // Rest of the scenario
+            parent.insertBefore(dragsource, droptarget);
+        }
+        return true;
+    };
+
+    //Handle dragend event
+    Migrator.dragend = function (e) {
+        var self = this;
+        var list = this.getMatchingElement(e.target, "li");
+
+        self.removePlaceholder();
+        self.removeTargetClass();
+        if(list){
+            if (self.dropElemParent === self.dragElemParent) {
+                //self.setDropElement();
+                self.sort();
+                self.addClass(self.dragElem, "added");
+                self.element.dispatchEvent(new CustomEvent("sortcomplete", {cancelable: true}));
+            } else {
+                self.removeClass(self.dragElem, "active");
+                console.log("Multilevel operation not allowed");
+            }
+
+            self.removeClass(self.dragElem, "current");
+        }
+        e.stopPropagation();
+        e.preventDefault();
+    };
+    Migrator.dragend.context = "element";
+    Migrator.dragend.eventt = "dragend";
+
+});

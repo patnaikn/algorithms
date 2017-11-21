@@ -1,0 +1,243 @@
+/*globals Co*/
+(function () {
+    sb.migrator("storage", function () {
+        "use strict";
+
+        var Storage = this;
+
+        var LOCAL_STORAGE_PROPERTY = 'ngMigratorLandingPages';
+
+        Storage.setup = function(configCtx) {
+            this.configCtx = configCtx;
+
+            // Store objects
+            this.storedWip = this.getSaved() || [];
+            this.siteWip = this.getSite() || new Site(this.configCtx.webId);
+            this.pageWip = this.getPage() || new Page(this.configCtx.page);
+
+            return this;
+        };
+
+        Storage.getSite = function getSite() {
+            var site, savedSite;
+
+            for (var i=0, l=this.storedWip.length; i < l; i++) {
+                if (this.storedWip[i].webId === this.configCtx.webId) {
+                    savedSite = this.storedWip[i];
+                    break;
+                }
+            }
+
+            // Parse savedPages
+            if (savedSite) {
+                site = Site.fromJSON(savedSite);
+            }
+
+            return site;
+        };
+
+        Storage.getPage = function getPage () {
+            var me = this;
+            var savedPages = this.siteWip.pages || [];
+            var page, savedPage;
+
+            for (var i=0, l=savedPages.length; i < l; i++) {
+                if (savedPages[i].name === this.configCtx.page) {
+                    savedPage = savedPages[i];
+                    break;
+                }
+            }
+
+            if (savedPage) {
+                page = Page.fromJSON(JSON.stringify(savedPage));
+            }
+
+            return page;
+        };
+
+        Storage.updateStoredWip = function (obj) {
+            var me = this;
+            var existing = 0;
+
+            Array.prototype.forEach.call(this.storedWip, function (el, i) {
+                if (el.webId === obj.webId) {
+                    me.storedWip[i] = obj;
+                    existing += 1;
+                }
+            });
+
+            if (existing === 0) {
+                this.storedWip.push(obj);
+            }
+        };
+
+        //  Local Storage
+        Storage.getSaved = function () {
+            // Read localStorage
+            var allWip = JSON.parse(localStorage.getItem(LOCAL_STORAGE_PROPERTY));
+
+            return allWip;
+        };
+
+        Storage.setSaved = function (action) {
+            if (action) {
+                this.siteWip[action + 'Page'](this.pageWip);
+            } else {
+                this.siteWip.addPage(this.pageWip);
+            }
+            this.updateStoredWip(this.siteWip);
+
+            // Update the localStorage object
+            localStorage.setItem(LOCAL_STORAGE_PROPERTY, JSON.stringify(this.storedWip));
+        };
+
+        // Site object
+        function Site(webId, pages) {
+            this.webId = webId;
+            this.pages = pages || [];
+        }
+
+        Site.prototype.addPage = function addPage(obj) {
+            var self = this;
+            var existing = 0;
+
+            Array.prototype.forEach.call(this.pages, function (el, i) {
+                if (el.name === obj.name) {
+                    self.pages[i] = obj;
+                    existing += 1;
+                }
+            });
+
+            if (existing === 0) {
+                this.pages.push(obj);
+            }
+        };
+
+        Site.prototype.updatePage = function updatePage(obj) {
+            var self = this;
+            var existing = 0;
+
+            Array.prototype.forEach.call(this.pages, function (el, i) {
+                if (el.name === obj.name) {
+                    self.pages[i].protoCards = obj.protoCards;
+                    existing += 1;
+                }
+            });
+
+            if (existing === 0) {
+                this.pages.push(obj);
+            }
+        };
+
+        Site.prototype.deletePage = function deletePage(obj) {
+            var self = this;
+
+            if (obj) {
+                Array.prototype.forEach.call(this.pages, function (el, i) {
+                    if (el.name === obj.name) {
+                        self.pages.splice(i, 1);
+                    }
+                });
+            }
+        };
+
+        Site.fromJSON = function fromJSON(json) {
+            var site = json;
+            return new Site(site.webId, site.pages);
+        };
+
+        Site.prototype.forStorage = function forStorage() {
+            return JSON.stringify(this);
+        };
+
+        // Page object
+        function Page(name, cards, type) {
+            this.name = name || "LandingPage_2";
+            this.contentType = type;
+            this.protoCards = cards || []; // Array of content Cards
+        }
+
+        Page.prototype.addCard = function addCard(card, migratedPage) {
+            if (!this.protoCards.length && !migratedPage) {
+                card.primary = true;
+            }
+
+            this.protoCards.push(card);
+        };
+
+        Page.prototype.updateCard = function addCard(card) {
+            var self = this;
+
+            Array.prototype.forEach.call(this.protoCards, function (c, i) {
+                if (c.id === card.id) {
+                    self.protoCards[i] = card;
+                }
+            });
+        };
+
+        Page.prototype.deleteCard = function deleteCard(card) {
+            var self = this;
+            var removed;
+
+            Array.prototype.forEach.call(this.protoCards, function (c, i) {
+                if (c.id === card.id) {
+                    removed = self.protoCards.splice(i, 1);
+                }
+            });
+
+            return removed;
+        };
+
+        Page.prototype.toPreviewJson = function toPreviewJson() {
+            var self = this;
+            var cards = [];
+
+            Array.prototype.forEach.call(this.protoCards, function (c) {
+                cards.push({
+                    "wrapper": {
+                        "id": c.id,
+                        "name": self.getTitle(c.widgets)
+                    },
+                    "items": c.widgets
+                });
+            });
+
+            return cards;
+        };
+
+        Page.prototype.getTitle = function getTitle(content) {
+            var title = '';
+            var altTitle1 = '';
+            var altTitle2, altTitle3, altTitle4;
+
+            Array.prototype.forEach.call(content, function (wid) {
+                if (wid.type === 'title') {
+                    title += ' ' + wid.content.text;
+                }
+                // Fallback strings
+                if (wid.type === 'subtitle') {
+                    altTitle1 = wid.content.text;
+                } else if (wid.type === 'copy') {
+                    altTitle2 = wid.content.text.substring(0, 30);
+                } else if (wid.type === 'media') {
+                    altTitle3 = wid.content.imageName;
+                } else if (wid.type === 'link') {
+                    altTitle4 = wid.content.name;
+                }
+            });
+
+            return title.trim() || altTitle1.trim() || altTitle2 || altTitle3 || altTitle4 || '';
+        };
+
+        Page.prototype.promoteCard = function promoteCard(card) {
+            Array.prototype.forEach.call(this.protoCards, function (c) {
+                c.primary = c.id === card.id ? true : false;
+            });
+        };
+
+        Page.fromJSON = function fromJSON(json) {
+            var page = JSON.parse(json);
+            return new Page(page.name, page.protoCards, page.contentType);
+        };
+    }).requires();
+}());

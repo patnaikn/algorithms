@@ -1,0 +1,377 @@
+sb.directive.sortmigratorcontent("clientspec", function () {
+
+    "use strict";
+
+    describe("sb.directive.sortmigratorcontent", function () {
+        var newDragEvent,listContainer,listElement,childTextElement,childStarElement,
+            mockup,
+            container,
+            element,
+            directive,
+            directiveName = "sb-sortmigratorcontent",
+            first,
+            last,
+            clock,
+            draggables;
+
+
+        beforeEach(function () {
+            container = document.createElement("form");
+            mockup = "<ul class='cardQueue' directiveName>"+
+                "<li><span class='text'></span><span class='star'></span></li>"+
+                "<li><span class='text'></span><span class='star'></span></li>"+
+                "<li><span class='text'></span><span class='star'></span></ul>";
+            container.innerHTML = mockup;
+            element = container.querySelector("[" + directiveName + "]");
+            draggables = container.querySelectorAll("li");
+            document.body.appendChild(container);
+            Co.directive.activate(element);
+            directive = element.directives[directiveName];
+            first = directive.element.firstElementChild;
+            last = directive.element.lastElementChild;
+            clock = sinon.useFakeTimers();
+            newDragEvent = function (name) {
+                var evt = new CustomEvent(name);
+                evt.dataTransfer = {
+                    setData: function () {
+                    },
+                    setDragImage: function () {
+                    }
+                };
+                return evt;
+            };
+        });
+
+        afterEach(function () {
+            // remove dom element mocked for testing
+            clock.restore();
+            container.parentNode.removeChild(container);
+        });
+
+        it("is a Co module", function () {
+            expect(sb.directive.sortmigratorcontent.isCo).to.be.true;
+        });
+
+        describe("methods", function () {
+
+            describe("init()", function () {
+                var setOptionsSpy;
+
+                beforeEach(function () {
+                    setOptionsSpy = sinon.spy(directive, "setOptions");
+                });
+
+                afterEach(function () {
+                    // restore
+                    setOptionsSpy.restore();
+                });
+
+                it("registers options and other properties on init", function () {
+                    expect(directive.element).to.eql(element);
+                });
+            });
+
+            describe("dragstart()", function () {
+                var addClassSpy;
+                beforeEach(function () {
+                    addClassSpy = sinon.spy(directive, "addClass");
+                });
+
+                afterEach(function () {
+                    addClassSpy.restore();
+                });
+                it("Handle DragStart event", function () {
+                    var mockEvent = {
+                        currentTarget: first,
+                        originalEvent: {
+                            dataTransfer: {
+                                setData: sinon.spy(),
+                                effectAllowed: "move",
+                                setDragImage: sinon.spy()
+                            }
+                        },
+                        stopPropagation: sinon.spy()
+                    };
+                    directive.dragstart(mockEvent);
+
+                    assert(addClassSpy.calledWith(mockEvent.currentTarget, "active"));
+                    assert(mockEvent.originalEvent.dataTransfer.setData.called);
+                    assert(mockEvent.originalEvent.dataTransfer.setDragImage.called);
+                    clock.tick(0);
+                    assert(addClassSpy.calledWith(mockEvent.currentTarget, "current"));
+                    assert(mockEvent.stopPropagation.called);
+
+                });
+
+            });
+
+            describe("dragenter()", function () {
+
+                var setTargetClassSpy,showPlaceholderSpy,mockEvent;
+                beforeEach(function () {
+                    setTargetClassSpy = sinon.spy(directive, "setTargetClass");
+                    showPlaceholderSpy = sinon.spy(directive, "showPlaceholder");
+                    mockEvent = {
+                        currentTarget: last,
+                        originalEvent: {
+                            clientY: 100
+                        },
+                        stopPropagation: sinon.spy(),
+                        preventDefault: sinon.spy()
+                    };
+                });
+
+                afterEach(function () {
+                    setTargetClassSpy.restore();
+                    showPlaceholderSpy.restore();
+                });
+
+                it("Handle DragEnter", function () {
+                    directive.dropElemParent = directive.dragElemParent = element;
+                    directive.dragenter(mockEvent);
+
+                    expect(directive.previeMode).to.be.true;
+                    assert(setTargetClassSpy.calledWith(mockEvent.currentTarget));
+                    assert(showPlaceholderSpy.called);
+                    clock.tick(400);
+                    expect(directive.previeMode).to.be.false;
+                    assert(mockEvent.stopPropagation.called);
+                    assert(mockEvent.preventDefault.called);
+                });
+            });
+
+            describe("dragend()", function () {
+                var mockEvent, removePlaceholderSpy, removeTargetClassSpy, removeClassSpy, addClassSpy, dropElementSpy,mockElm;
+
+                beforeEach(function () {
+                    removePlaceholderSpy = sinon.spy(directive, "removePlaceholder");
+                    removeTargetClassSpy = sinon.spy(directive, "removeTargetClass");
+                    removeClassSpy = sinon.spy(directive, "removeClass");
+                    addClassSpy = sinon.spy(directive, "addClass");
+                    dropElementSpy = sinon.spy(directive, "setDropElement");
+                    mockEvent = {
+                        currentTarget: last,
+                        stopPropagation: sinon.spy(),
+                        preventDefault: sinon.spy()
+                    };
+                    mockElm = {
+                        dispatchEvent: sinon.spy()
+                    };
+                });
+
+                afterEach(function () {
+                    removePlaceholderSpy.restore();
+                    removeTargetClassSpy.restore();
+                    removeClassSpy.restore();
+                    addClassSpy.restore();
+                    dropElementSpy.restore();
+                });
+
+                it("Handle dragEnd where drop parent and candidate parent are equal", function () {
+                    directive.element = directive.dropElemParent = directive.dragElemParent = element;
+                    directive.dropElemParent = element;
+                    directive.dragElem = last;
+                    directive.dragend(mockEvent);
+
+                    assert(removePlaceholderSpy.called);
+                    assert(removeTargetClassSpy.called);
+                    assert(dropElementSpy.called);
+                    assert(addClassSpy.calledWith(last, "added"));
+                    assert(removeClassSpy.calledWith(last, "current"));
+                    assert(mockEvent.stopPropagation.called);
+                    assert(mockEvent.preventDefault.called);
+                    setTimeout(function () {
+                        assert(mockElm.dispatchEvent.called);
+                        assert(mockElm.dispatchEvent.calledWith(new CustomEvent("sortcomplete", {
+                            cancelable: false
+                        })));
+                    }, 0);
+                });
+
+                it("Handle dragEnd where drop parent not equal to candidate parent", function () {
+
+                    directive.dropElemParent = element;
+                    directive.dragElem = last;
+                    directive.dragend(mockEvent);
+
+                    assert(removePlaceholderSpy.called);
+                    assert(removeTargetClassSpy.called);
+                    assert(removeClassSpy.calledWith(last, "active"));
+                    assert(removeClassSpy.calledWith(last, "current"));
+                    assert(mockEvent.stopPropagation.called);
+                    assert(mockEvent.preventDefault.called);
+                });
+            });
+
+            describe("showPlaceholder()", function () {
+                var getPlaceHolderSpy,removePlaceholderSpy,dropElementSpy;
+
+                beforeEach(function () {
+                    getPlaceHolderSpy = sinon.spy(directive, "getPlaceHolder");
+                    removePlaceholderSpy = sinon.spy(directive, "removePlaceholder");
+                    dropElementSpy = sinon.spy(directive, "setDropElement");
+                });
+
+                afterEach(function () {
+                    getPlaceHolderSpy.restore();
+                    removePlaceholderSpy.restore();
+                    dropElementSpy.restore();
+                });
+
+                it("Show drop placeholder", function () {
+                    directive.dropElemParent = directive.dragElemParent = element;
+                    directive.showPlaceholder();
+
+                    assert(getPlaceHolderSpy.called);
+                    assert(removePlaceholderSpy.called);
+                    assert(dropElementSpy.called);
+                });
+            });
+
+            describe("dropElement()", function () {
+                it("Drop element to specific target", function () {
+                    var second = first.nextElementSibling, newLast;
+                    directive.dropElemParent = element;
+                    directive.dropElemTarget = first;
+                    directive.dragElem = last;
+
+                    directive.setDropElement();
+                    newLast = directive.element.lastElementChild;
+                    expect(newLast.isSameNode(second));
+                });
+            });
+
+            describe("removePlaceholder()", function () {
+                it("Remove placeholder element", function () {
+                    var lastElm,
+                        placeholder = directive.getPlaceHolder();
+                    //adding a placeholder
+                    element.append(placeholder);
+                    lastElm = element.lastElementChild;
+
+                    expect(placeholder.isSameNode(lastElm)).to.be.true;
+
+                    directive.removePlaceholder();
+
+                    lastElm = element.lastElementChild;
+                    expect(lastElm.isSameNode(last)).to.be.true;
+                });
+            });
+
+            describe("setTargetClass()", function () {
+                var removeTargetClassSpy,addClassSpy;
+
+                beforeEach(function () {
+                    removeTargetClassSpy = sinon.spy(directive, "removeTargetClass");
+                    addClassSpy = sinon.spy(directive, "addClass");
+                });
+
+                afterEach(function () {
+                    removeTargetClassSpy.restore();
+                    addClassSpy.restore();
+                });
+
+                it("Set target class name to potential target element", function () {
+                    directive.setTargetClass(first);
+
+                    assert(removeTargetClassSpy.called);
+                    assert(addClassSpy.calledWith(first, "target"));
+                });
+            });
+
+            describe("removeTargetClass()", function () {
+                var removeClassSpy;
+
+                beforeEach(function () {
+                    removeClassSpy = sinon.spy(directive, "removeClass");
+                });
+
+                afterEach(function () {
+                    removeClassSpy.restore();
+                });
+
+                it("Remove target class from all drop targets", function () {
+                    //setting a target class
+                    directive.setTargetClass(first);
+
+                    expect(first.classList.contains("target")).to.be.true;
+                    //remove the target class
+                    directive.removeTargetClass();
+
+                    expect(first.classList.contains("target")).to.be.false;
+
+                    assert(removeClassSpy.called);
+                });
+            });
+
+        });
+
+        describe("events", function () {
+
+            describe("dragstart", function () {
+                var dragStartSpy;
+
+                beforeEach(function () {
+                    dragStartSpy = sinon.spy(directive, "dragstart");
+                });
+
+                afterEach(function () {
+                    dragStartSpy.restore();
+                });
+
+                it("dispatch drag start event on element", function () {
+                    var evt = newDragEvent("dragstart");
+
+                    last.dispatchEvent(evt);
+                    setTimeout(function () {
+                        assert(dragStartSpy.called);
+                    }, 0);
+                });
+            });
+
+            describe("dragenter",function () {
+                var dragEnterSpy;
+
+                beforeEach(function () {
+                    dragEnterSpy = sinon.spy(directive, "dragenter");
+                });
+
+                afterEach(function () {
+                    dragEnterSpy.restore();
+                });
+
+                it("dispatch drag enter event on element",function () {
+                    var evt = newDragEvent("dragenter");
+
+                    last.dispatchEvent(evt);
+                    setTimeout(function () {
+                        assert(dragEnterSpy.called);
+                    }, 0);
+                });
+            });
+
+            describe("dragend",function () {
+                var dragEndSpy;
+
+                beforeEach(function () {
+                    dragEndSpy = sinon.spy(directive, "dragenter");
+                });
+
+                afterEach(function () {
+                    dragEndSpy.restore();
+                });
+                it("dispatch drag end event on element",function () {
+                    var evt = newDragEvent("dragenter");
+
+                    last.dispatchEvent(evt);
+
+                    setTimeout(function () {
+                        assert(dragEndSpy.called);
+                    }, 0);
+                });
+            });
+        });
+
+    });
+
+});
